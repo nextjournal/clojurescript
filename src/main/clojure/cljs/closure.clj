@@ -38,6 +38,7 @@
               SourceMap$DetailLevel ClosureCodingConvention SourceFile
               Result JSError CheckLevel DiagnosticGroups
               CommandLineRunner AnonymousFunctionNamingPolicy
+              PropertyRenamingPolicy
               JSModule SourceMap VariableMap]
            [com.google.javascript.jscomp.deps ModuleLoader$ResolutionMode ModuleNames]
            [com.google.javascript.rhino Node]
@@ -208,7 +209,8 @@
     :fn-invoke-direct :checked-arrays :closure-module-roots :rewrite-polyfills :use-only-custom-externs
     :watch :watch-error-fn :watch-fn :install-deps :process-shim :rename-prefix :rename-prefix-namespace
     :closure-variable-map-in :closure-property-map-in :closure-variable-map-out :closure-property-map-out
-    :stable-names :ignore-js-module-exts :opts-cache :aot-cache :elide-strict :fingerprint :spec-skip-macros})
+    :stable-names :ignore-js-module-exts :opts-cache :aot-cache :elide-strict :fingerprint :spec-skip-macros
+    :property-renaming-policy})
 
 (def string->charset
   {"iso-8859-1" StandardCharsets/ISO_8859_1
@@ -315,6 +317,15 @@
       (when (.exists prop-in)
         (.setInputPropertyMap compiler-options
           (VariableMap/load (.getAbsolutePath prop-in))))))
+
+  (when (contains? opts :property-renaming-policy)
+    (let [policy (:property-renaming-policy opts)]
+      (.setPropertyRenaming compiler-options
+                            (case policy
+                              :off PropertyRenamingPolicy/OFF
+                              :all-unquoted PropertyRenamingPolicy/ALL_UNQUOTED
+                              (throw (util/compilation-error (IllegalArgumentException. (str "Invalid :property-renaming-policy value " policy " - only :off, :all-unquoted permitted"))))))))
+
 
   (. compiler-options
     (setOutputCharset (to-charset (:closure-output-charset opts "UTF-8"))) ;; only works > 20160125 Closure Compiler
