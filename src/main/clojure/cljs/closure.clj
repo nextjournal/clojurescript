@@ -1099,6 +1099,11 @@
   (cons (javascript-file nil (io/resource "goog/base.js") ["goog"] nil)
         inputs))
 
+(defn add-bootstrap-graaljs
+  [inputs]
+  (cons (javascript-file nil (io/resource "cljs/bootstrap_graaljs.js") ["boostrap_graaljs"] ["goog"])
+        inputs))
+
 (defn add-js-sources
   "Given list of IJavaScript objects, add foreign-deps, constants-table
    IJavaScript objects to the list."
@@ -3015,6 +3020,7 @@
                                 (cond-> (= :nodejs (:target opts)) (concat [(-compile (io/resource "cljs/nodejs.cljs") opts)]))
                                 deps/dependency-order
                                 (add-preloads opts)
+                                (cond-> (= :graaljs (:target opts)) add-bootstrap-graaljs)
                                 remove-goog-base
                                 add-goog-base
                                 (cond-> (= :nodejs (:target opts)) (concat [(-compile (io/resource "cljs/nodejscli.cljs") opts)]))
