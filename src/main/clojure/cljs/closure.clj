@@ -2990,7 +2990,7 @@
                            (repeat warnings))
                          warnings)))
                    ana/*verbose* (:verbose opts)]
-           (when ana/*verbose*
+           (when (and ana/*verbose* (not (::watch-triggered-build? opts)))
              (util/debug-prn "Options passed to ClojureScript compiler:" (pr-str opts)))
            (let [one-file? (and (:main opts)
                                 (#{:advanced :simple :whitespace} (:optimizations opts)))
@@ -3017,13 +3017,19 @@
                                 (compile-sources compiler-stats compile-opts)
                                 (#(map add-core-macros-if-cljs-js %))
                                 (add-js-sources opts)
-                                (cond-> (= :nodejs (:target opts)) (concat [(-compile (io/resource "cljs/nodejs.cljs") opts)]))
+                                (cond-> (= :nodejs (:target opts))
+                                  (concat
+                                    [(-compile (io/resource "cljs/nodejs.cljs")
+                                       (assoc opts :output-file "nodejs.js"))]))
                                 deps/dependency-order
                                 (add-preloads opts)
                                 (cond-> (= :graaljs (:target opts)) add-bootstrap-graaljs)
                                 remove-goog-base
                                 add-goog-base
-                                (cond-> (= :nodejs (:target opts)) (concat [(-compile (io/resource "cljs/nodejscli.cljs") opts)]))
+                                (cond-> (= :nodejs (:target opts))
+                                  (concat
+                                    [(-compile (io/resource "cljs/nodejscli.cljs")
+                                       (assoc opts :output-file "nodejscli.js"))]))
                                 (->> (map #(source-on-disk opts %)) doall)
                                 (compile-loader opts))
                  _ (when (:emit-constants opts)
@@ -3134,8 +3140,9 @@
           srvc  (.newWatchService fs)]
       (letfn [(buildf []
                 (try
-                  (let [start (System/nanoTime)]
-                    (build source opts compiler-env)
+                  (let [start (System/nanoTime)
+                        watch-opts (assoc opts ::watch-triggered-build? true)]
+                    (build source watch-opts compiler-env)
                     (println "... done. Elapsed"
                       (/ (unchecked-subtract (System/nanoTime) start) 1e9) "seconds")
                     (flush))

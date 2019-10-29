@@ -86,9 +86,9 @@
         :else d))))
 
 (defn hash-scope [s]
-  #?(:clj  (or (:identity s) (System/identityHashCode s))
-     :cljs (hash-combine (-hash ^not-native (:name s))
-             (shadow-depth s))))
+  (hash-combine #?(:clj  (hash (:name s))
+                   :cljs (-hash ^not-native (:name s)))
+    (shadow-depth s)))
 
 (declare munge)
 
@@ -1136,17 +1136,21 @@
                                 (not ('#{any clj clj-or-nil clj-nil number string boolean function object array js} tag))
                                 (when-let [ps (:protocols (ana/resolve-existing-var env tag))]
                                   (ps protocol)))))))
+        first-arg-tag (ana/infer-tag env (first (:args expr)))
         opt-not? (and (= (:name info) 'cljs.core/not)
-                      (= (ana/infer-tag env (first (:args expr))) 'boolean))
+                      (= first-arg-tag 'boolean))
+        opt-count? (and (= (:name info) 'cljs.core/count)
+                        (boolean ('#{string array} first-arg-tag)))
         ns (:ns info)
-        js? (or (= ns 'js) (= ns 'Math))
+        ftag (ana/infer-tag env f)
+        js? (or (= ns 'js) (= ns 'Math) (:foreign info)) ;; foreign - i.e. global / Node.js library
         goog? (when ns
                 (or (= ns 'goog)
                     (when-let [ns-str (str ns)]
                       (= (get (string/split ns-str #"\.") 0 nil) "goog"))
                     (not (contains? (::ana/namespaces @env/*compiler*) ns))))
 
-        keyword? (or (= 'cljs.core/Keyword (ana/infer-tag env f))
+        keyword? (or (= 'cljs.core/Keyword ftag)
                      (let [f (ana/unwrap-quote f)]
                        (and (= (-> f :op) :const)
                             (keyword? (-> f :form)))))
@@ -1193,6 +1197,9 @@
        opt-not?
        (emits "(!(" (first args) "))")
 
+       opt-count?
+       (emits "((" (first args) ").length)")
+
        proto?
        (let [pimpl (str (munge (protocol-prefix protocol))
                         (munge (name (:name info))) "$arity$" (count args))]
@@ -1231,7 +1238,7 @@
 
 (defmethod emit* :set!
   [{:keys [target val env]}]
-  (emit-wrap env (emits target " = " val)))
+  (emit-wrap env (emits "(" target " = " val ")")))
 
 (defn emit-global-export [ns-name global-exports lib]
   (emitln (munge ns-name) "."

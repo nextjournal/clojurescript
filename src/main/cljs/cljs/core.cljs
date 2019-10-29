@@ -1454,7 +1454,7 @@
 (defn- ci-reduce
   "Accepts any collection which satisfies the ICount and IIndexed protocols and
 reduces them without incurring seq initialization"
-  ([cicoll f]
+  ([^not-native cicoll f]
      (let [cnt (-count cicoll)]
        (if (zero? cnt)
          (f)
@@ -1465,18 +1465,9 @@ reduces them without incurring seq initialization"
                  @nval
                  (recur nval (inc n))))
              val)))))
-  ([cicoll f val]
+  ([^not-native cicoll f val]
      (let [cnt (-count cicoll)]
        (loop [val val, n 0]
-         (if (< n cnt)
-           (let [nval (f val (-nth cicoll n))]
-             (if (reduced? nval)
-               @nval
-               (recur nval (inc n))))
-           val))))
-  ([cicoll f val idx]
-     (let [cnt (-count cicoll)]
-       (loop [val val, n idx]
          (if (< n cnt)
            (let [nval (f val (-nth cicoll n))]
              (if (reduced? nval)
@@ -1980,11 +1971,13 @@ reduces them without incurring seq initialization"
   "assoc[iate]. When applied to a map, returns a new map of the
    same (hashed/sorted) type, that contains the mapping of key(s) to
    val(s). When applied to a vector, returns a new vector that
-   contains val at index."
+   contains val at index. Note - index must be <= (count vector)."
   ([coll k v]
-    (if-not (nil? coll)
-      (-assoc coll k v)
-      (array-map k v)))
+   (if (implements? IAssociative coll)
+     (-assoc coll k v)
+     (if-not (nil? coll)
+       (-assoc coll k v)
+       (array-map k v))))
   ([coll k v & kvs]
      (let [ret (assoc coll k v)]
        (if kvs
@@ -5721,7 +5714,7 @@ reduces them without incurring seq initialization"
   "Creates a new vector containing the args."
   [& args]
   (if (and (instance? IndexedSeq args) (zero? (.-i args)))
-    (.fromArray PersistentVector (.-arr args) true)
+    (.fromArray PersistentVector (.-arr args) (not (array? (.-arr args))))
     (vec args)))
 
 (declare subvec)
@@ -5849,7 +5842,8 @@ reduces them without incurring seq initialization"
 
   IStack
   (-peek [coll]
-    (-nth v (dec end)))
+    (when-not (== start end)
+      (-nth v (dec end))))
   (-pop [coll]
     (if (== start end)
       (throw (js/Error. "Can't pop empty vector"))
@@ -5962,12 +5956,10 @@ reduces them without incurring seq initialization"
     (do
       (when-not (vector? v)
         (throw (js/Error. "v must satisfy IVector")))
-      (let [c (count v)]
-        (when (or (neg? start)
-                  (neg? end)
-                  (> start c)
-                  (> end c))
-          (throw (js/Error. "Index out of bounds"))))
+      (when (or (neg? start)
+                (< end start)
+                (> end (count v)))
+        (throw (js/Error. "Index out of bounds")))
       (Subvec. meta v start end __hash))))
 
 (defn subvec
@@ -11720,3 +11712,7 @@ reduces them without incurring seq initialization"
   which sets up an implementation of cljs.core/*eval* for that environment."
   [form]
   (*eval* form))
+
+(when ^boolean js/COMPILED
+  (when (= "nodejs" *target*)
+    (set! goog/global js/global)))

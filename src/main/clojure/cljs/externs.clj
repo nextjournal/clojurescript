@@ -7,15 +7,20 @@
 ;   You must not remove this notice, or any other, from this software.
 
 (ns cljs.externs
-  (:require [clojure.string :as string]
-            [cljs.util :as util]
+  (:require [cljs.util :as util]
+            [cljs.js-deps :as js-deps]
             [clojure.java.io :as io]
-            [cljs.js-deps :as js-deps])
-  (:import [java.util.logging Level]
-           [com.google.javascript.jscomp
+            [clojure.string :as string])
+  (:import [com.google.javascript.jscomp
             CompilerOptions SourceFile JsAst CommandLineRunner]
+           [com.google.javascript.jscomp.parsing Config$JsDocParsing]
            [com.google.javascript.rhino
-            Node Token JSTypeExpression]))
+            Node Token JSTypeExpression JSDocInfo$Visibility]
+           [java.util.logging Level]))
+
+(def ^:dynamic *ignore-var* false)
+(def ^:dynamic *source-file* nil)
+(def ^:dynamic *goog-ns* nil)
 
 ;; ------------------------------------------------------------------------------
 ;; Externs Parsing
@@ -26,28 +31,54 @@
       (into [] (butlast props))
       (with-meta (last props) ty))))
 
-(defn get-type* [^JSTypeExpression texpr]
+(defn get-tag [^JSTypeExpression texpr]
   (when-let [root (.getRoot texpr)]
     (if (.isString root)
-      (symbol (.getString root))
-      (if-let [child (.. root getFirstChild)]
+      (symbol (.getString root))(if-let [child (.. root getFirstChild)]
         (if (.isString child)
           (symbol (.. child getString)))))))
 
-(defn get-type [^Node node]
+(defn params->method-params [xs]
+  (letfn [(not-opt? [x]
+            (not (string/starts-with? (name x) "opt_")))]
+    (let [required (into [] (take-while not-opt? xs))
+          opts (drop-while not-opt? xs)]
+      (loop [ret [required] opts opts]
+        (if-let [opt (first opts)]
+          (recur (conj ret (conj (last ret) opt)) (drop 1 opts))
+          (seq ret))))))
+
+(defn get-var-info [^Node node]
   (when node
     (let [info (.getJSDocInfo node)]
       (when info
-        (if-let [^JSTypeExpression ty (.getType info)]
-          {:tag (get-type* ty)}
-          (if (or (.isConstructor info) (.isInterface info))
-            (let [qname (symbol (.. node getFirstChild getQualifiedName))]
-              (cond-> {:tag 'Function}
-                (.isConstructor info) (merge {:ctor qname})
-                (.isInterface info) (merge {:iface qname})))
-            (if (.hasReturnType info)
-              {:tag 'Function
-               :ret-tag (get-type* (.getReturnType info))})))))))
+        (merge
+          (if-let [^JSTypeExpression ty (.getType info)]
+            {:tag (get-tag ty)}
+            (if (or (.isConstructor info) (.isInterface info))
+              (let [qname (symbol (.. node getFirstChild getQualifiedName))]
+                (cond-> {:tag 'Function}
+                  (.isConstructor info) (merge {:ctor qname})
+                  (.isInterface info) (merge {:iface qname})))
+              (if (or (.hasReturnType info)
+                      (as-> (.getParameterCount info) c
+                        (and c (pos? c))))
+                (let [arglist  (into [] (map symbol (.getParameterNames info)))
+                      arglists (params->method-params arglist)]
+                  {:tag             'Function
+                   :js-fn-var       true
+                   :ret-tag         (or (some-> (.getReturnType info) get-tag)
+                                        'clj-nil)
+                   :variadic?       (boolean (some '#{var_args} arglist))
+                   :max-fixed-arity (count (take-while #(not= 'var_args %) arglist))
+                   :method-params   arglists
+                   :arglists        arglists}))))
+          {:file *source-file*
+           :line (.getLineno node)}
+          (when-let [doc (.getOriginalCommentString info)]
+            {:doc doc})
+          (when (= JSDocInfo$Visibility/PRIVATE (.getVisibility info))
+            {:private true}))))))
 
 (defmulti parse-extern-node
   (fn [^Node node]
@@ -55,7 +86,7 @@
 
 (defmethod parse-extern-node Token/VAR [node]
   (when (> (.getChildCount node) 0)
-    (let [ty (get-type node)]
+    (let [ty (get-var-info node)]
       (cond-> (parse-extern-node (.getFirstChild node))
         ty (-> first (annotate ty) vector)))))
 
@@ -65,11 +96,13 @@
 
 (defmethod parse-extern-node Token/ASSIGN [node]
   (when (> (.getChildCount node) 0)
-    (let [ty  (get-type node)
+    (let [ty  (get-var-info node)
           lhs (cond-> (first (parse-extern-node (.getFirstChild node)))
                 ty (annotate ty))]
       (if (> (.getChildCount node) 1)
-        (let [externs (parse-extern-node (.getChildAtIndex node 1))]
+        (let [externs
+              (binding [*ignore-var* true]
+                (parse-extern-node (.getChildAtIndex node 1)))]
           (conj (map (fn [ext] (concat lhs ext)) externs)
             lhs))
         [lhs]))))
@@ -83,10 +116,11 @@
       [lhs])))
 
 (defmethod parse-extern-node Token/GETPROP [node]
-  (let [props (map symbol (string/split (.getQualifiedName node) #"\."))]
-    [(if-let [ty (get-type node)]
-       (annotate props ty)
-       props)]))
+  (when-not *ignore-var*
+    (let [props (map symbol (string/split (.getQualifiedName node) #"\."))]
+      [(if-let [ty (get-var-info node)]
+         (annotate props ty)
+         props)])))
 
 (defmethod parse-extern-node Token/OBJECTLIT [node]
   (when (> (.getChildCount node) 0)
@@ -108,22 +142,26 @@
 (defmethod parse-extern-node :default [node])
 
 (defn parse-externs [^SourceFile source-file]
-  (let [^CompilerOptions compiler-options (CompilerOptions.)
-        closure-compiler
-        (doto
-          (let [compiler (com.google.javascript.jscomp.Compiler.)]
-            (com.google.javascript.jscomp.Compiler/setLoggingLevel Level/WARNING)
-            compiler)
-          (.init (list source-file) '() compiler-options))
-        js-ast (JsAst. source-file)
-        ^Node root (.getAstRoot js-ast closure-compiler)]
-    (loop [nodes (.children root)
-           externs []]
-      (if (empty? nodes)
-        externs
-        (let [node (first nodes)
-              new-extern (parse-extern-node node)]
-          (recur (rest nodes) (concat externs new-extern)))))))
+  (binding [*source-file* (.getName source-file)]
+    (let [^CompilerOptions compiler-options
+          (doto (CompilerOptions.)
+            (.setParseJsDocDocumentation
+              Config$JsDocParsing/INCLUDE_DESCRIPTIONS_WITH_WHITESPACE))
+          closure-compiler
+          (doto
+            (let [compiler (com.google.javascript.jscomp.Compiler.)]
+              (com.google.javascript.jscomp.Compiler/setLoggingLevel Level/WARNING)
+              compiler)
+            (.init (list source-file) '() compiler-options))
+          js-ast (JsAst. source-file)
+          ^Node root (.getAstRoot js-ast closure-compiler)]
+      (loop [nodes (.children root)
+             externs []]
+        (if (empty? nodes)
+          externs
+          (let [node (first nodes)
+                new-extern (parse-extern-node node)]
+            (recur (rest nodes) (concat externs new-extern))))))))
 
 (defn index-externs [externs]
   (reduce
@@ -154,11 +192,36 @@
            externs (index-externs (parse-externs externs-file))))
        defaults sources))))
 
+(defn parsed->defs [externs]
+  (reduce
+    (fn [m xs]
+      (let [sym (last xs)]
+        (cond-> m
+          (seq xs) (assoc sym (merge (meta sym) {:ns *goog-ns* :name sym})))))
+    {} externs))
+
+(defn analyze-goog-file [f]
+  (let [rsrc (io/resource f)
+        desc (js-deps/parse-js-ns (line-seq (io/reader rsrc)))
+        ns   (-> (:provides desc) first symbol)]
+    ;; TODO: figure out what to do about other provides
+    (binding [*goog-ns* ns]
+      {:name ns
+       :defs (parsed->defs
+               (parse-externs
+                 (SourceFile/fromInputStream f (io/input-stream rsrc))))})))
+
 (comment
   (require '[clojure.java.io :as io]
            '[cljs.closure :as closure]
            '[clojure.pprint :refer [pprint]]
            '[cljs.js-deps :as js-deps])
+
+  (pprint
+    (get-in (analyze-goog-file "goog/dom/dom.js")
+      [:defs 'setTextContent]))
+
+  (pprint (analyze-goog-file "goog/string/string.js"))
 
   (get (js-deps/js-dependency-index {}) "goog.string")
 
@@ -171,10 +234,17 @@
       2)
     last meta)
 
-  (externs-map
-    [(closure/js-source-file "goog/string/string.js"
-       (io/input-stream (io/resource "goog/string/string.js")))]
-    {})
+  (parse-externs
+    (closure/js-source-file "goog/string/string.js"
+      (io/input-stream (io/resource "goog/string/string.js"))))
+
+  (-> (externs-map
+        [(closure/js-source-file "goog/string/string.js"
+           (io/input-stream (io/resource "goog/string/string.js")))]
+        {})
+    (get-in '[goog string])
+    (find 'numberAwareCompare_)
+    first meta)
 
   (externs-map)
 

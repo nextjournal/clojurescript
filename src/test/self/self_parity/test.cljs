@@ -176,7 +176,8 @@
   technical issues)."
   [name macros]
   ((if macros
-     #{'cljs.core}
+     #{'cljs.core
+       'cljs.repl}
      #{'goog.object
        'goog.string
        'goog.string.StringBuffer
@@ -302,6 +303,7 @@
                  [cljs.pprint]
                  [cljs.pprint-test]
                  [cljs.spec-test]
+                 [cljs.specials-test]
                  [cljs.spec.test-test]
                  [cljs.clojure-alias-test]
                  [cljs.hash-map-test]
@@ -315,6 +317,7 @@
                  [cljs.array-access-test]
                  [cljs.inference-test]
                  [cljs.walk-test]
+                 [cljs.repl-test]
                  [cljs.extend-to-native-test]))
     (fn [{:keys [value error]}]
       (if error
@@ -349,6 +352,7 @@
              'cljs.pprint
              'cljs.pprint-test
              'cljs.spec-test
+             'cljs.specials-test
              'cljs.spec.test-test
              'cljs.clojure-alias-test
              'cljs.hash-map-test
@@ -362,6 +366,7 @@
              'cljs.array-access-test
              'cljs.inference-test
              'cljs.walk-test
+             'cljs.repl-test
              'cljs.extend-to-native-test)
           (fn [{:keys [value error]}]
             (when error

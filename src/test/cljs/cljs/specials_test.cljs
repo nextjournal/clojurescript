@@ -6,14 +6,20 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 
-(ns cljs.ns-test.foo
+(ns cljs.specials-test
   (:require [cljs.test :refer-macros [deftest is]]))
 
-(defn baz [] 123)
+(defprotocol IFoo3125
+  (-mutate [this]))
 
-(def kw ::foo)
-(def qkw '::foo)
+(defrecord Foo3125 [^:mutable x]
+  IFoo3125
+  (-mutate [this] (* 3 (set! x (inc x)))))
 
-(deftest test-namespaced-keywords
-  (is (= (str kw) ":cljs.ns-test.foo/foo"))
-  (is (= (str qkw) ":cljs.ns-test.foo/foo")))
+(def ^:dynamic *test-cljs-3125* 4)
+
+(deftest test-cljs-3125
+  (is (== 12 (let [o #js {}] (* 6 (set! (.-a o) 2)))))
+  (is (== 12 (let [o #js {}] (* 6 (set! o -a 2)))))
+  (is (== 15 (* 3 (set! *test-cljs-3125* (inc *test-cljs-3125*)))))
+  (is (== 18 (-mutate (->Foo3125 5)))))

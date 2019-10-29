@@ -1703,6 +1703,14 @@
   (is (= "ab" (str "a" nil "b")))
   (is (= "ahellob" (str "a" (str-fn-2865) "b"))))
 
+(deftest test-cljs-2886
+  (is (zero? (count "")))
+  (is (== 1 (count "a")))
+  (is (zero? (count #js [])))
+  (is (== 1 (count #js [1])))
+  (is (zero? (count [])))
+  (is (== 1 (count [1]))))
+
 (deftest test-cljs-2934
   (let [x (delay 1)]
     (is (= "#object[cljs.core.Delay {:status :pending, :val nil}]" (pr-str x)))
@@ -1774,3 +1782,24 @@
     (is (= '(3 2 1) (into nil [1 2 3]))))
   (testing "calling `set/union` with nilable sets returns a nilable set"
     (is (nil? (set/union #{} nil nil)))))
+
+(deftest test-cljs-3092
+  (is (nil? (peek (subvec [] 0))))
+  (is (nil? (peek (subvec [1] 1))))
+  (is (nil? (peek (subvec [1 2] 0 0))))
+  (is (nil? (peek (subvec [1 2] 1 1))))
+  (is (nil? (peek (subvec [1 2] 2 2)))))
+
+(deftest test-cljs-3093
+  (is (thrown-with-msg? js/Error #"Index out of bounds" (subvec [1 2 3 4] -1)))
+  (is (= [1 2 3 4] (subvec [1 2 3 4] -0.9)))
+  (is (thrown-with-msg? js/Error #"Index out of bounds" (subvec [1 2 3 4] 2 1)))
+  (is (= [] (subvec [1 2 3 4] 1.7 1.3)))
+  (is (thrown-with-msg? js/Error #"Index out of bounds" (subvec [1 2 3 4] 0 5)))
+  (is (= [1 2 3 4] (subvec [1 2 3 4] 0 4.9))))
+
+(deftest test-cljs-3095
+  (let [a #js [:original]
+        v (apply vector a)]
+    (aset a 0 :modified)
+    (is (= :original (v 0)))))

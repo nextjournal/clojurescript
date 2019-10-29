@@ -6,6 +6,12 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 
-(ns baz)
+(ns cljs.source-map.base64-tests
+  (:require
+    [clojure.test :refer [deftest is]]
+    [cljs.source-map.base64 :as base64]))
 
-(defn f [x] x)
+(deftest encode-test
+  (doseq [n (range 64)]
+    (is (= (get base64/int->char n) (base64/encode n))))
+  (is (thrown-with-msg? Error #"Must be between 0 and 63: 64" (base64/encode 64))))
