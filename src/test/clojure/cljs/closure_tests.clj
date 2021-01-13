@@ -159,6 +159,19 @@
                                      "jss-extend/lib"]}))
                  modules))))
   (.delete (io/file "package.json"))
+  (test/delete-node-modules)
+  (spit (io/file "package.json") "{}")
+  (closure/maybe-install-node-deps! {:npm-deps {"@codemirror/state" "0.17.1"}})
+  (let [modules (closure/index-node-modules-dir)]
+    (is (true? (some (fn [module]
+                       (= module
+                          {:file (.getAbsolutePath (io/file "node_modules/@codemirror/state/dist/index.cjs"))
+                           :module-type :es6
+                           :provides ["@codemirror/state/dist/index.cjs"
+                                      "@codemirror/state/dist/index"
+                                      "@codemirror/state"]}))
+                     modules))))
+  (.delete (io/file "package.json"))
   (test/delete-node-modules))
 
 (deftest test-index-node-modules-module-deps-js

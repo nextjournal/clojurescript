@@ -2761,7 +2761,7 @@
                        {:provides (let [module-rel-name (-> (subs path (.lastIndexOf path "node_modules"))
                                                             (string/replace \\ \/)
                                                             (string/replace #"node_modules[\\\/]" ""))
-                                        provides (cond-> [module-rel-name (string/replace module-rel-name #"\.js(on)?$" "")]
+                                        provides (cond-> [module-rel-name (string/replace module-rel-name #"\.(c)?js(on)?$" "")]
                                                    (some? pkg-json-main)
                                                    (conj pkg-json-main))
                                         index-replaced (string/replace module-rel-name #"[\\\/]index\.js(on)?$" "")]
